@@ -1,0 +1,58 @@
+name: Build APK
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Unzip project
+        run: |
+          mkdir app
+          unzip -q ./*.zip -d app
+
+      - name: Detect project type
+        id: p
+        run: |
+          P=$(find app -name pubspec.yaml | head -n1)
+          if [ -n "$P" ]; then
+            echo "type=flutter" >> $GITHUB_OUTPUT
+            echo "dir=$(dirname "$P")" >> $GITHUB_OUTPUT
+          else
+            G=$(find app -name gradlew | head -n1)
+            echo "type=android" >> $GITHUB_OUTPUT
+            echo "dir=$(dirname "$G")" >> $GITHUB_OUTPUT
+          fi
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: subosito/flutter-action@v2
+        if: steps.p.outputs.type == 'flutter'
+        with:
+          channel: stable
+
+      - name: Build Flutter APK
+        if: steps.p.outputs.type == 'flutter'
+        working-directory: ${{ steps.p.outputs.dir }}
+        run: |
+          flutter pub get
+          flutter build apk --debug
+
+      - name: Build Android APK
+        if: steps.p.outputs.type == 'android'
+        working-directory: ${{ steps.p.outputs.dir }}
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: app-apk
+          path: app/**/*.apk
