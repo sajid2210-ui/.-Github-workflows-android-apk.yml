@@ -14,18 +14,26 @@ jobs:
         run: |
           mkdir app
           unzip -q ./*.zip -d app
+          echo "Files in project:"
+          find app -maxdepth 3 | head -60
 
-      - name: Detect project type
+      - name: Detect project
         id: p
         run: |
-          P=$(find app -name pubspec.yaml | head -n1)
-          if [ -n "$P" ]; then
-            echo "type=flutter" >> $GITHUB_OUTPUT
-            echo "dir=$(dirname "$P")" >> $GITHUB_OUTPUT
+          S=$(find app \( -name settings.gradle -o -name settings.gradle.kts \) | head -n1)
+          if [ -z "$S" ]; then
+            S=$(find app \( -name build.gradle -o -name build.gradle.kts \) | head -n1)
+          fi
+          if [ -z "$S" ]; then
+            echo "No Gradle project found in the ZIP"
+            exit 1
+          fi
+          D=$(dirname "$S")
+          echo "dir=$D" >> $GITHUB_OUTPUT
+          if [ -f "$D/gradlew" ]; then
+            echo "wrapper=yes" >> $GITHUB_OUTPUT
           else
-            G=$(find app -name gradlew | head -n1)
-            echo "type=android" >> $GITHUB_OUTPUT
-            echo "dir=$(dirname "$G")" >> $GITHUB_OUTPUT
+            echo "wrapper=no" >> $GITHUB_OUTPUT
           fi
 
       - uses: actions/setup-java@v4
@@ -33,24 +41,22 @@ jobs:
           distribution: temurin
           java-version: 17
 
-      - uses: subosito/flutter-action@v2
-        if: steps.p.outputs.type == 'flutter'
+      - uses: gradle/actions/setup-gradle@v4
+        if: steps.p.outputs.wrapper == 'no'
         with:
-          channel: stable
+          gradle-version: 8.9
 
-      - name: Build Flutter APK
-        if: steps.p.outputs.type == 'flutter'
-        working-directory: ${{ steps.p.outputs.dir }}
-        run: |
-          flutter pub get
-          flutter build apk --debug
-
-      - name: Build Android APK
-        if: steps.p.outputs.type == 'android'
+      - name: Build with wrapper
+        if: steps.p.outputs.wrapper == 'yes'
         working-directory: ${{ steps.p.outputs.dir }}
         run: |
           chmod +x gradlew
-          ./gradlew assembleDebug
+          ./gradlew assembleDebug --stacktrace
+
+      - name: Build with Gradle
+        if: steps.p.outputs.wrapper == 'no'
+        working-directory: ${{ steps.p.outputs.dir }}
+        run: gradle assembleDebug --stacktrace
 
       - uses: actions/upload-artifact@v4
         with:
